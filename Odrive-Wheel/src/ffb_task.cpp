@@ -365,13 +365,31 @@ static void ffb_thread(void *arg) {
         }
 
         if (tud_hid_ready()) {
-            reportHID_t<int16_t> rpt;
+            // Adri haptic controller:
+            // - GM6208 encoder stays INTERNAL for motor position/speed, endstops
+            //   and FFB torque calculation.
+            // - ESP32 MPU steering arrives as analog voltage on ODrive GPIO3.
+            // - Configure GPIO3 as AXIS -> RX in the ODrive-Wheel GPIO settings.
+            // - We copy that processed RX value to HID X, because games expect
+            //   the primary FFB steering axis on X.
+            reportHID_t<int16_t> rpt{};
             rpt.id = 1;
             rpt.buttons = 0;
-            rpt.X = (int16_t)s_axis_raw->getScaledAxisPos();
-            // Phase 4.x — popula buttons + axes extras (RX/RY/RZ/Slider) a partir
-            // dos GPIOs 1-4 configurados em modo button/axis.
-            gpio_inputs_update_report(&rpt.buttons, &rpt.RX, &rpt.RY, &rpt.RZ, &rpt.Slider);
+
+            // Populate analog GPIO axes/buttons first.
+            gpio_inputs_update_report(
+                &rpt.buttons,
+                &rpt.RX,
+                &rpt.RY,
+                &rpt.RZ,
+                &rpt.Slider
+            );
+
+            // Primary steering seen by Windows / AMS2:
+            // GPIO3 configured as RX -> HID X.
+            // Motor encoder is NOT exposed as steering anymore.
+            rpt.X = rpt.RX;
+            rpt.RX = 0;   // avoid exposing the same steering twice
             // Telemetria 1 kHz nos axes não usados (Y, Z, Dial, +VBus/IBus/IBrake):
             //   Y      = vel_estimate × 1000 (turns/s × 1000, range ±32.767 t/s)
             //   Z      = Iq_measured × 1000  (A × 1000,       range ±32.767 A)
